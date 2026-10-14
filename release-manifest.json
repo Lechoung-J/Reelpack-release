@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "repository": "Lechoung-J/Reelpack-release",
   "minimum_macos": "14.0",
-  "distribution_status": "private_preparation",
+  "distribution_status": "preview",
   "assets": {
     "arm64": {
       "filename": "Reelpack-0.1.0-arm64.zip",
-      "sha256": "44f330945961b2e5320f7a9748f00707e3bc18c2d5cf7ec0a069f3b8156e8574",
-      "size": 3304456
+      "sha256": "f52e22798bd2b7067647291a908aad3655df1896f8c6772b5c5edcbe16ee20f7",
+      "size": 3304447
     }
   }
 }

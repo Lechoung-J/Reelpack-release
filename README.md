@@ -30,11 +30,11 @@ Reelpack 想让 AI **真的坐下来，把片子看一遍**：谁在第几秒说
 - **平台**：Apple Silicon（arm64），macOS 14 或更新
 - **版本**：0.1.0 preview
 - **文件**：
-  - `Reelpack-0.1.0-arm64.zip`（3,304,456 字节）
+  - `Reelpack-0.1.0-arm64.zip`（3,304,447 字节）
   - `Reelpack-0.1.0-arm64.zip.sha256`
   - `release-manifest.json`
 - **SHA-256**：
-  `44f330945961b2e5320f7a9748f00707e3bc18c2d5cf7ec0a069f3b8156e8574`
+  `f52e22798bd2b7067647291a908aad3655df1896f8c6772b5c5edcbe16ee20f7`
 
 下载后先校验：
 
