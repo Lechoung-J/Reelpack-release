@@ -26,6 +26,7 @@ PUBLIC_RELEASE=0
 CHECK_ONLY=0
 NO_LAUNCH=0
 NO_PYTHON_DOWNLOAD=0
+NO_AGENT_REGISTER=0
 REPLACE_APP=0
 PYTHON=
 UV=
@@ -53,7 +54,7 @@ usage() {
 Local, verified installation (no release required):
   --archive FILE             Local .zip containing Reelpack.app
   --sha256 HEX_OR_FILE        Expected SHA256, or a checksum list with the asset name
-  --manifest FILE            Local release manifest (schema_version: 1)
+  --manifest FILE            Matching build's release-manifest.json (fresh ZIP hash, schema_version: 1)
   --wheelhouse DIR            Install only from local wheels; no index/network fallback
   --no-python-download       Do not install a managed Python via an existing uv
 
@@ -78,6 +79,7 @@ Runtime and destination:
   --replace-app              Back up an existing App before installing a verified replacement
   --check                    Read-only checks of the installed App and all five environments
   --no-launch                Run runtime checks without launching the GUI
+  --no-agent-register        Skip agent skills and ~/.local/bin entry; keep runtime CLI/skill
   -h, --help                 Show this help
 
 Private repositories use an authenticated gh command directly, never a credentialed
@@ -118,6 +120,7 @@ while [ "$#" -gt 0 ]; do
         --no-python-download) NO_PYTHON_DOWNLOAD=1; shift ;;
         --check) CHECK_ONLY=1; NO_LAUNCH=1; NO_PYTHON_DOWNLOAD=1; shift ;;
         --no-launch) NO_LAUNCH=1; shift ;;
+        --no-agent-register) NO_AGENT_REGISTER=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die 2 "Unknown option: $1 (use --help)" ;;
     esac
@@ -216,6 +219,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -254,6 +258,157 @@ def url(value, hosts=None):
     if hosts is not None and hostname not in [h.lower() for h in hosts]:
         fail("asset hostname is not allowed; configure --allow-host explicitly")
     return hostname
+
+def skill_safe_path(value):
+    p = Path(plain(str(value)))
+    if not p.is_absolute() or p != Path(os.path.abspath(p)):
+        fail("skill/launcher path must be a normalized absolute path")
+    for component in (*reversed(p.parents), p):
+        try:
+            mode = component.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode): fail(f"symlink preserved: {component}")
+        if component != p and not stat.S_ISDIR(mode): fail(f"parent is not a directory: {component}")
+    return p
+
+def skill_file_status(destination, content):
+    p = skill_safe_path(destination)
+    if not os.path.lexists(p): return "missing"
+    if not p.is_file(): fail(f"non-file preserved: {p}")
+    if p.stat().st_size != len(content): return "conflict"
+    return "reused" if p.read_bytes() == content else "conflict"
+
+def skill_materialize(directory, files, check_only=False, require_empty=False):
+    directory = skill_safe_path(directory)
+    if directory.exists() and not directory.is_dir(): fail(f"non-directory preserved: {directory}")
+    states = {name: skill_file_status(directory / name, content) for name, (content, _) in files.items()}
+    if "conflict" in states.values():
+        return {"status": "conflict", "reason": "existing content differs; use manual integration", "files": []}
+    for name, (_, mode) in files.items():
+        if mode & 0o111 and states[name] == "reused" and not os.access(directory / name, os.X_OK):
+            return {"status": "conflict", "reason": "existing command entry is not executable; set permissions manually", "files": []}
+    if require_empty and states.get("SKILL.md") == "missing" and directory.exists() and any(directory.iterdir()):
+        return {"status": "conflict", "reason": "occupied skill directory preserved; use manual integration", "files": []}
+    records = []
+    if not check_only:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        skill_safe_path(directory)
+    for name, (content, mode) in files.items():
+        destination = directory / name
+        state = states[name]
+        if state == "missing" and not check_only:
+            skill_safe_path(destination)
+            # Exclusive creation also refuses a file/symlink appearing after the checks.
+            fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+            with os.fdopen(fd, "wb") as out:
+                out.write(content)
+                os.fchmod(out.fileno(), mode)
+            state = "installed"
+        records.append({"path": str(destination), "sha256": hashlib.sha256(content).hexdigest(), "status": state})
+    status = "missing" if check_only and "missing" in states.values() else "ready" if check_only else "installed" if "missing" in states.values() else "reused"
+    return {"status": status, "files": records}
+
+def integrate_skills(app, runtime, register=True, check_only=False, native_brew="/opt/homebrew"):
+    app, runtime, home = skill_safe_path(app), skill_safe_path(runtime), Path.home()
+    if runtime in (Path("/"), home): fail("unsafe runtime root")
+    source = skill_safe_path(app / "Contents/Resources/SKILL.md")
+    if not source.is_file() or not 0 < source.stat().st_size <= 2 * 1024 * 1024:
+        fail("canonical App SKILL.md is missing, empty or oversized")
+    canonical = source.read_bytes()
+    canonical.decode("utf-8")
+    entry = runtime / "bin/reelpack"
+    adapter = skill_safe_path(app / "Contents/Resources/Core/agent_entry.py")
+    if not adapter.is_file(): fail("App agent_entry.py is missing")
+    frontmatter = ("---\nname: reelpack\ndescription: Analyze local videos with Reelpack into transcripts, shots, OCR, audio timing, and evidence frames; use the asset pack to answer questions.\n---\n\n")
+    direct_command = (f"env REELPACK_RUNTIME_ROOT={shlex.quote(str(runtime))} "
+        f"{shlex.quote(str(runtime / '.venv/bin/python'))} -B {shlex.quote(str(adapter))}")
+    guidance = f"## Installed command\n\nCall this absolute entry if `reelpack` is not on PATH:\n\n```bash\n{shlex.quote(str(entry))} \"<local video file>\" --output-dir ~/Reelpack\n```\n\nIf the installer preserved an existing custom entry, use this direct adapter instead:\n\n```bash\n{direct_command} \"<local video file>\" --output-dir ~/Reelpack\n```\n\n"
+    native = (frontmatter + guidance).encode("utf-8") + canonical
+    metadata = {"schema_version": 1, "managed_by": "reelpack-install", "name": "reelpack", "canonical_sha256": hashlib.sha256(canonical).hexdigest(), "skill_sha256": hashlib.sha256(native).hexdigest()}
+    metadata_bytes = (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    launcher = ("#!/bin/sh\n# Generated by the Reelpack installer.\n"
+        f"export REELPACK_RUNTIME_ROOT={shlex.quote(str(runtime))}\n"
+        f"export PATH={shlex.quote(str(runtime / 'bin') + ':' + native_brew + '/bin:' + native_brew + '/sbin')}:\"${{PATH:-/usr/bin:/bin:/usr/sbin:/sbin}}\"\n"
+        'reelpack_home="${HOME:-}"\n'
+        f'[ -n "$reelpack_home" ] || reelpack_home={shlex.quote(str(home))}\n'
+        'export REELPACK_CACHE_ROOT="${REELPACK_CACHE_ROOT:-$reelpack_home/Library/Caches/Reelpack}"\n'
+        'export NUMBA_CACHE_DIR="$REELPACK_CACHE_ROOT/numba"\n'
+        'export MPLCONFIGDIR="$REELPACK_CACHE_ROOT/mpl"\n'
+        'export PYTHONPYCACHEPREFIX="$REELPACK_CACHE_ROOT/pycache"\n'
+        'export PYTHONDONTWRITEBYTECODE=1\n'
+        'reelpack_model_cache="${XDG_CACHE_HOME:-$reelpack_home/.cache}"\n'
+        'export HF_HOME="${HF_HOME:-$reelpack_model_cache/huggingface}"\n'
+        'export TORCH_HOME="${TORCH_HOME:-$reelpack_model_cache/torch}"\n'
+        # agent_entry prepares the real cache before importing Core or workers.
+        f"exec {shlex.quote(str(runtime / '.venv/bin/python'))} -B {shlex.quote(str(adapter))} \"$@\"\n").encode("utf-8")
+    report = {"schema_version": 1, "managed_by": "reelpack-install", "app_skill": str(source), "canonical_sha256": metadata["canonical_sha256"], "skill_sha256": metadata["skill_sha256"], "launchers": [], "agents": [], "files": []}
+    def materialize(directory, files, require_empty=False):
+        try:
+            outcome = skill_materialize(directory, files, check_only, require_empty)
+        except (OSError, ValueError) as exc:
+            outcome = {"status": "unsafe", "reason": str(exc), "files": []}
+        report["files"].extend(outcome["files"])
+        return {key: value for key, value in outcome.items() if key != "files"}
+    canonical_path = runtime / "share/reelpack/SKILL.md"
+    report["canonical_skill"] = {"path": str(canonical_path), **materialize(canonical_path.parent, {"SKILL.md": (canonical, 0o600)})}
+    print(f"[Reelpack] Canonical skill: {canonical_path} ({report['canonical_skill']['status']}); App source: {source}")
+    if report["canonical_skill"].get("reason"): print(f"[Reelpack] WARNING: {report['canonical_skill']['reason']}")
+    for destination, enabled in ((entry, True), (home / ".local/bin/reelpack", register)):
+        outcome = materialize(destination.parent, {"reelpack": (launcher, 0o700)}) if enabled else {"status": "disabled"}
+        report["launchers"].append({"path": str(destination), **outcome})
+        print(f"[Reelpack] Command entry: {destination} ({outcome['status']})")
+        if outcome.get("reason"): print(f"[Reelpack] WARNING: {outcome['reason']}")
+    ready_entries = [item for item in report["launchers"] if item["status"] in ("installed", "reused", "ready")]
+    command_entry = shlex.quote(ready_entries[0]["path"]) if ready_entries else direct_command
+    print(f"[Reelpack] Command to use: {command_entry}")
+    if ready_entries:
+        print(f"[Reelpack] To use reelpack by name, add its command directory to PATH:")
+        print(f"  export PATH={shlex.quote(str(Path(ready_entries[0]['path']).parent))}:\"$PATH\"")
+    for agent, detectors, relative in (
+        ("Claude Code", (".claude",), ".claude/skills/reelpack"),
+        ("Codex", (".agents", ".codex"), ".agents/skills/reelpack"),
+        ("Cursor", (".cursor",), ".cursor/skills/reelpack"),
+    ):
+        destination = home / relative
+        # Existence only: no settings, credentials or agent configuration files are read.
+        detected = [home / name for name in detectors if (home / name).is_dir()]
+        outcome = {"status": "disabled" if not register else "not_detected"}
+        if register and detected:
+            try:
+                for config_directory in detected: skill_safe_path(config_directory)
+                outcome = materialize(destination, {"SKILL.md": (native, 0o600), ".metadata.json": (metadata_bytes, 0o600)}, require_empty=True)
+            except (OSError, ValueError) as exc:
+                outcome = {"status": "unsafe", "reason": str(exc)}
+        report["agents"].append({"agent": agent, "detected": bool(detected), "path": str(destination / "SKILL.md"), **outcome})
+        print(f"[Reelpack] {agent}: {outcome['status']} at {destination / 'SKILL.md'}")
+        if outcome.get("reason"): print(f"[Reelpack] WARNING: {outcome['reason']}")
+        if outcome["status"] in ("installed", "reused", "ready"):
+            print(f"[Reelpack] {agent}: start a new session and ask it to use the reelpack skill.")
+        else:
+            print(f"[Reelpack] {agent}: manual integration: ask the agent to read {source}, then use: {command_entry}. To enable native discovery, create its config directory and rerun without --no-agent-register; existing custom content must be moved manually first.")
+    report_path = runtime / "skill-integration.json"
+    if check_only:
+        print(f"[Reelpack] Read-only integration check; no skills, command entries or report written ({report_path}).")
+    else:
+        try:
+            skill_safe_path(report_path)
+            content = (json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+            if os.path.lexists(report_path):
+                if not report_path.is_file() or report_path.stat().st_size > 1024 * 1024 or report_path.stat().st_nlink != 1:
+                    fail("integration report target must be a regular small file with one link")
+                previous = json.loads(report_path.read_text(encoding="utf-8"))
+                if not isinstance(previous, dict) or previous.get("managed_by") != "reelpack-install" or previous.get("schema_version") != 1:
+                    fail("unmanaged integration report preserved")
+                # Only this installer's report is refreshed; skill/launcher contents never are.
+                fd = os.open(report_path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+            else:
+                fd = os.open(report_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as out: out.write(content)
+            print(f"[Reelpack] Integration result: {report_path}")
+        except (OSError, ValueError) as exc:
+            print(f"[Reelpack] WARNING: integration report preserved/not written: {exc}")
+    return report
 
 try:
     if command == "canonical":
@@ -388,17 +543,29 @@ try:
                 if not (p.is_dir() or p.is_file()): fail("App contains a special file")
         with (app / "Contents/Info.plist").open("rb") as f: info = plistlib.load(f)
         if info.get("CFBundleExecutable") != "Reelpack": fail("CFBundleExecutable must be Reelpack")
+        if info.get("CFBundleIdentifier") != "com.reelpack.app": fail("unexpected Reelpack bundle identifier")
+        if info.get("CFBundleIconFile") != "AppIcon": fail("CFBundleIconFile must be AppIcon")
+        icon = app / "Contents/Resources/AppIcon.icns"
+        if not icon.is_file(): fail("App resource missing: AppIcon.icns")
+        with icon.open("rb") as f:
+            if f.read(4) != b"icns": fail("invalid AppIcon.icns")
         minimum = info.get("LSMinimumSystemVersion", "14.0")
         def numbers(v): return tuple(int(x) for x in v.split("."))
         if numbers(minimum) > numbers(os_version): fail("App needs a newer macOS")
+        for name in ("SKILL.md", "RELEASE_NOTES.md"):
+            p = app / "Contents/Resources" / name
+            if not p.is_file() or not 0 < p.stat().st_size <= 2 * 1024 * 1024:
+                fail(f"App resource missing/invalid: {name}")
         core = app / "Contents/Resources/Core"
-        required = ["core.py", "audio_analyze.py", "shot_detect_transnet.py", "optional_backend_worker.py", "requirements-arm64.txt", "requirements-audio.txt", "requirements-transnet.txt", "constraints-transnet.txt", "requirements-ocr.txt", "requirements-music.txt"]
+        required = ["agent_entry.py", "runtime_environment.py", "core.py", "audio_analyze.py", "shot_detect_transnet.py", "optional_backend_worker.py", "requirements-arm64.txt", "requirements-audio.txt", "requirements-transnet.txt", "constraints-transnet.txt", "requirements-ocr.txt", "requirements-music.txt"]
         for name in required:
             if not (core / name).is_file(): fail(f"App resource missing: Core/{name}")
         for rel in ("Contents/MacOS/Reelpack", "Contents/Resources/Tools/macos_ocr/macos_ocr"):
             p = app / rel
             if not p.is_file() or not os.access(p, os.X_OK): fail(f"App executable missing: {rel}")
         print(f"App layout verified: {app}")
+    elif command == "skills":
+        integrate_skills(path(args[0]), path(args[1]), register=args[2] == "0", check_only=args[3] == "1", native_brew=args[4])
     elif command == "move":
         source, destination, root = path(args[0]), path(args[1]), canonical(args[2])
         # Check both resolved absolute paths BEFORE any rename; never overwrite.
@@ -661,16 +828,24 @@ verify_environment() {
     [ ! -L "$environment" ] && [ -d "$environment" ] || { warn "$name: missing environment or symlink directory"; return 1; }
     native_python "$python" || { warn "$name: Python is not native $ARCH / 3.12"; return 1; }
     PYTHONDONTWRITEBYTECODE=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-        "$python" -I -B - "$name" "$ARCH" "$requirements" "$constraints" "$environment" <<'PY'
+        "$python" -I -B - "$name" "$ARCH" "$requirements" "$constraints" "$environment" "$CHECK_ONLY" <<'PY'
 import importlib
 import importlib.metadata as metadata
 import importlib.util
+import os
 from pathlib import Path
 import platform
 import re
 import sys
-name, arch, requirements, constraints, environment = sys.argv[1:]
+name, arch, requirements, constraints, environment, check_only = sys.argv[1:]
+read_only = check_only == "1"
+sys.dont_write_bytecode = True
+if read_only:
+    os.environ["REELPACK_READONLY_CHECK"] = "1"
 try:
+    sys.path.insert(0, str(Path(requirements).parent))
+    from runtime_environment import prepare_runtime_environment
+    os.environ.update(prepare_runtime_environment(create=not read_only))
     if platform.machine() != arch or sys.version_info[:2] != (3, 12): raise RuntimeError("native Python mismatch")
     if sys.prefix == sys.base_prefix: raise RuntimeError("interpreter is not isolated in a venv")
     if Path(sys.prefix).resolve() != Path(environment).resolve(): raise RuntimeError("interpreter belongs to a different environment")
@@ -688,23 +863,32 @@ try:
             if actual != m[2]: raise RuntimeError(f"{m[1]}: installed {actual}, expected {m[2]}")
     imports = {
         "main": ["numpy", "av", "cv2", "faster_whisper", "ctranslate2", "onnxruntime", "PIL", "yaml", "requests"],
-        "audio": ["numpy", "librosa", "soundfile", "scipy", "pyloudnorm"],
+        "audio": ["numpy", "librosa", "soundfile", "scipy", "pyloudnorm", "PIL"],
         "transnet": ["numpy", "torch", "cv2", "transnetv2_pytorch"],
         "ocr": ["numpy", "onnxruntime", "cv2", "rapidocr_onnxruntime"],
         "music": ["numpy", "torch", "librosa", "soundfile", "torchlibrosa"],
     }[name]
-    for module in imports: importlib.import_module(module)
+    for module in imports:
+        if read_only:
+            if importlib.util.find_spec(module) is None: raise RuntimeError(f"module missing: {module}")
+        else:
+            importlib.import_module(module)
     if name == "music":
         # Importing panns_inference can download labels. Metadata/find_spec only.
         metadata.version("panns-inference")
         if importlib.util.find_spec("panns_inference") is None: raise RuntimeError("panns_inference module missing")
-    print(f"{name}: native={platform.machine()} Python={platform.python_version()} pins/imports=ok")
+    checks = "pins/module metadata=ok; no imports or cache writes" if read_only else "pins/imports=ok"
+    print(f"{name}: native={platform.machine()} Python={platform.python_version()} {checks}; JIT not_run")
 except Exception as exc:
     print(f"{name}: validation failed: {type(exc).__name__}: {exc}", file=sys.stderr)
     sys.exit(1)
 PY
     local status=$?
     [ "$status" -eq 0 ] || return "$status"
+    if [ "$CHECK_ONLY" -eq 1 ]; then
+        log "$name: read-only exact pins/module metadata checked; dependency solver and JIT not_run"
+        return 0
+    fi
     if "$python" -I -B -c 'import importlib.util,sys; sys.exit(0 if importlib.util.find_spec("pip") else 1)' >/dev/null 2>&1; then
         PYTHONDONTWRITEBYTECODE=1 PIP_CONFIG_FILE=/dev/null "$python" -I -B -m pip --disable-pip-version-check check || return 1
     elif [ -n "$UV" ]; then
@@ -749,8 +933,12 @@ setup_environment() {
         [ ! -L "$environment" ] || die 4 "$name environment is a symlink; preserved and refused"
         if [ "$repair" -eq 0 ]; then
             log "Verify existing $name: $environment"
-            verify_environment "$name" "$environment" "$requirements" "$constraints" ||
+            if ! verify_environment "$name" "$environment" "$requirements" "$constraints"; then
+                if [ "$name" = audio ]; then
+                    die 4 "音频环境需要更新，请运行 --repair-env audio；会先备份。现有音频环境已保留，未自动重建。"
+                fi
                 die 4 "Existing $name environment preserved. To explicitly back it up and rebuild, rerun with --repair-env $name (plus --no-launch if desired)."
+            fi
             return
         fi
         backup_env="$environment.backup-$(/bin/date +%Y%m%d-%H%M%S)-$$"
@@ -789,7 +977,8 @@ log "App: $APP_TARGET"
 log "Runtime root: $RUNTIME_ROOT"
 log "Environments: .venv / .venv-audio / .venv-transnet / .venv-ocr / .venv-music"
 log "ASR: the App/CLI uses large-v3; faster-whisper automatically caches it on first use. This installer does not download model weights."
-log "ASR cache: uses HF_HOME if set, otherwise the Hugging Face cache in ~/.cache/huggingface. You may export HF_ENDPOINT to a trusted endpoint before launching or pre-downloading."
+log "Acceleration cache: REELPACK_CACHE_ROOT or ~/Library/Caches/Reelpack; actual write denial falls back to stable TMPDIR/reelpack-cache-uid."
+log "ASR cache: preserves HF_HOME; persistent default is XDG_CACHE_HOME/huggingface or ~/.cache/huggingface. TORCH_HOME likewise stays persistent. Existing read-only Whisper snapshots use offline mode; no model download is attempted by checks."
 log "Optional pre-download command (may download several GB; honors your HF_ENDPOINT):"
 printf '  %q -c %q\n' "$RUNTIME_ROOT/.venv/bin/python" 'from faster_whisper import WhisperModel; WhisperModel("large-v3", device="cpu", compute_type="int8")'
 "$PYTHON" -I -B - <<'PY'
@@ -797,7 +986,7 @@ import csv
 import os
 from pathlib import Path
 home = Path.home()
-labels = home / "panns_data/class_labels_indices.csv"
+labels = Path(os.environ.get("READWECHAT_PANNS_LABELS", str(home / "panns_data/class_labels_indices.csv"))).expanduser()
 weights = Path(os.environ.get("READWECHAT_PANNS_CHECKPOINT", str(home / "panns_data/Cnn14_mAP=0.431.pth"))).expanduser()
 sed = Path(os.environ.get("READWECHAT_PANNS_SED_CHECKPOINT", str(home / "panns_data/Cnn14_DecisionLevelMax_mAP=0.385.pth"))).expanduser()
 try:
@@ -833,14 +1022,16 @@ done
 [ "$missing_tools" -eq 0 ] || die 6 "App/environment checks completed, but a full App runtime check cannot run without native ffmpeg and ffprobe. Fix PATH/tools, then rerun with --check."
 
 log "Run App runtime check with REELPACK_RUNTIME_ROOT and native PATH"
-if ! env REELPACK_RUNTIME_ROOT="$RUNTIME_ROOT" PATH="$PATH" HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+if ! env REELPACK_RUNTIME_ROOT="$RUNTIME_ROOT" PATH="$PATH" REELPACK_READONLY_CHECK=1 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
     "$APP_TARGET/Contents/MacOS/Reelpack" --runtime-check; then
     die 5 "App runtime check failed; App and environments preserved. Review the checker output, then rerun with --check."
 fi
 log "Runtime checks passed. Missing optional PANNs weights remain not_run."
+py_task skills "$APP_TARGET" "$RUNTIME_ROOT" "$NO_AGENT_REGISTER" "$CHECK_ONLY" "$NATIVE_BREW" ||
+    die 3 "Cannot validate Reelpack skill/CLI integration resources"
 if [ "$NO_LAUNCH" -eq 0 ]; then
     launch_arguments=(--env "REELPACK_RUNTIME_ROOT=$RUNTIME_ROOT" --env "PATH=$PATH")
-    for variable in HF_ENDPOINT HF_HOME READWECHAT_PANNS_CHECKPOINT READWECHAT_PANNS_SED_CHECKPOINT; do
+    for variable in REELPACK_CACHE_ROOT NUMBA_CACHE_DIR MPLCONFIGDIR PYTHONPYCACHEPREFIX HF_ENDPOINT HF_HOME HF_HUB_CACHE HUGGINGFACE_HUB_CACHE TORCH_HOME XDG_CACHE_HOME READWECHAT_PANNS_CHECKPOINT READWECHAT_PANNS_SED_CHECKPOINT READWECHAT_PANNS_LABELS; do
         value=${!variable:-}
         [ -z "$value" ] || launch_arguments+=(--env "$variable=$value")
     done
