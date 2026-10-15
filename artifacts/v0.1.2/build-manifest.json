@@ -2,9 +2,9 @@
   "name": "Reelpack",
   "version": "0.1.2",
   "release_tag": "v0.1.2",
-  "source_commit": "a2b05a31f13795ffd749f5dc7cf0cfde33a5c14e",
+  "source_commit": "bc0edced628c75eeddc3b40137ba1826a4ee9ee4",
   "source_dirty": false,
-  "source_commit_time": "2026-10-15T19:08:14+08:00",
+  "source_commit_time": "2026-10-15T20:01:58+08:00",
   "toolchain": "Apple Swift version 6.2.4 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)\nTarget: arm64-apple-macosx28.0",
   "architecture": "arm64",
   "minimum_macos": "14.0",
@@ -13,11 +13,11 @@
   "includes_python_runtime": false,
   "includes_model_weights": false,
   "includes_ffmpeg": false,
-  "bundle": "/private/var/folders/sh/6mv_pn5n4ln0ffm88drhf40r0000gn/T/reelpack-v012-skillrc2-40kidb9p/rc2/Reelpack.app",
-  "archive": "/private/var/folders/sh/6mv_pn5n4ln0ffm88drhf40r0000gn/T/reelpack-v012-skillrc2-40kidb9p/rc2/Reelpack-0.1.2-arm64.zip",
-  "archive_sha256": "2eb0df46abdd80e0941e3b02c98b846b31ed5583b5c0793c9bf16816cb86d237",
-  "archive_bytes": 3351956,
-  "bundle_bytes": 6701488,
+  "bundle": "/private/var/folders/sh/6mv_pn5n4ln0ffm88drhf40r0000gn/T/reelpack-v012-skillrc3-_h4d0hbv/rc3/Reelpack.app",
+  "archive": "/private/var/folders/sh/6mv_pn5n4ln0ffm88drhf40r0000gn/T/reelpack-v012-skillrc3-_h4d0hbv/rc3/Reelpack-0.1.2-arm64.zip",
+  "archive_sha256": "f62fd71550d119c23240404510041618007bbac936f92432a4653f47a97c6b6b",
+  "archive_bytes": 3351984,
+  "bundle_bytes": 6701564,
   "bundle_files": 50,
   "components_bytes": {
     "swift_executables": 4069296,
@@ -25,11 +25,11 @@
     "vision_ocr": 99312,
     "app_icon": 1161660,
     "readme_images": 905753,
-    "other_resources_and_metadata": 138418
+    "other_resources_and_metadata": 138494
   },
-  "build_seconds": 31.687463584006764,
+  "build_seconds": 32.01171620795503,
   "signing": "ad-hoc",
   "notarized": false,
   "zip_metadata_entries": [],
-  "skill_sha256": "0e42dafe62c049cb2710fb3139ab87bbfcc6a4232124cbf6b5bf6c7367dc2ab1"
+  "skill_sha256": "28ce16477972068abbc69b69b9a2e4271ad07251ca3b625f5ec8f4be075eb163"
 }
