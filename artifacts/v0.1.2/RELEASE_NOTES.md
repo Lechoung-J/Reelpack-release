@@ -5,7 +5,7 @@
 ## Changes in 0.1.2
 
 - Auto OCR runs a real built-in text probe, choosing RapidOCR, then macOS Vision, then an already-prepared local Ollama vision model. A probe must return nonempty text; actual material may legitimately contain no text. Error/timeout/per-frame failure triggers bounded fallback while preserving successful frames and backend provenance.
-- New `--rewrite short|film|off` (default short) adds optional semantic editing after transcription and before summary. `--rewrite-model` selects a prepared local text model (default qwen2.5:7b); `--cloud` uses the configured cloud backend. No model is downloaded automatically.
+- New `--rewrite short|film|off` defaults to off. Only an explicit `--rewrite short` or `--rewrite film` enables optional semantic editing after transcription and before summary. `--rewrite-model` selects a prepared local text model (default qwen2.5:7b); `--cloud` uses the configured cloud backend. No model is downloaded automatically.
 - Exported and package Markdown retain original transcription next to the rewrite, with per-segment before/after audit. Missing models, invalid responses and timeouts keep the original and label rewriting unavailable. Model output is an editable draft, not a factual guarantee.
 - Markdown now includes deduplicated on-screen text with timestamps when available, or an honest empty/unavailable state.
 - The 0.1.1 empty-speech/no-track outcomes, transactional checkpoints, managed installation upgrades, and clean-source build provenance are retained.
