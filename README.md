@@ -28,25 +28,26 @@ Reelpack 想让 AI **真的坐下来，把片子看一遍**：谁在第几秒说
 ## ⬇️ 下载
 
 - **平台**：Apple Silicon（arm64），macOS 14 或更新
-- **版本**：0.1.0 preview
+- **下载**：https://github.com/Lechoung-J/Reelpack-release/releases/tag/v0.1.1
+- **版本**：0.1.1 preview
 - **文件**：
-  - `Reelpack-0.1.0-arm64.zip`（3,304,447 字节）
-  - `Reelpack-0.1.0-arm64.zip.sha256`
+  - `Reelpack-0.1.1-arm64.zip`（3,333,731 字节）
+  - `Reelpack-0.1.1-arm64.zip.sha256`
   - `release-manifest.json`
 - **SHA-256**：
-  `f52e22798bd2b7067647291a908aad3655df1896f8c6772b5c5edcbe16ee20f7`
+  `ae0038d7b2720ecd08ea2fa6bbc3e2158a5a96fec0d451f474d09d151d698d30`
 
 下载后先校验：
 
 ```sh
-shasum -a 256 -c Reelpack-0.1.0-arm64.zip.sha256
+shasum -a 256 -c Reelpack-0.1.1-arm64.zip.sha256
 ```
 
 ## 安装
 
 ```sh
-bash install.sh --archive 'Reelpack-0.1.0-arm64.zip' \
-  --sha256 'Reelpack-0.1.0-arm64.zip.sha256' --no-launch
+bash install.sh --archive 'Reelpack-0.1.1-arm64.zip' \
+  --sha256 'Reelpack-0.1.1-arm64.zip.sha256' --no-launch
 ```
 
 默认安装到 `~/Applications/Reelpack.app` 与 `~/Library/Application Support/Reelpack/runtime/arm64`。
