@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "version": "0.1.1",
+  "release_tag": "v0.1.1",
+  "source_commit": "03f89bd3ff5aa3fa874450943afcab9469401629",
+  "source_dirty": false,
+  "repository": "Lechoung-J/Reelpack-release",
+  "minimum_macos": "14.0",
+  "distribution_status": "preview",
+  "assets": {
+    "arm64": {
+      "filename": "Reelpack-0.1.1-arm64.zip",
+      "sha256": "ae0038d7b2720ecd08ea2fa6bbc3e2158a5a96fec0d451f474d09d151d698d30",
+      "size": 3333731,
+      "url": "https://github.com/Lechoung-J/Reelpack-release/releases/download/v0.1.1/Reelpack-0.1.1-arm64.zip"
+    }
+  }
+}
