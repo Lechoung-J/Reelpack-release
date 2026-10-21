@@ -1282,9 +1282,9 @@ import csv
 import os
 from pathlib import Path
 home = Path.home()
-labels = Path(os.environ.get("READWECHAT_PANNS_LABELS", str(home / "panns_data/class_labels_indices.csv"))).expanduser()
-weights = Path(os.environ.get("READWECHAT_PANNS_CHECKPOINT", str(home / "panns_data/Cnn14_mAP=0.431.pth"))).expanduser()
-sed = Path(os.environ.get("READWECHAT_PANNS_SED_CHECKPOINT", str(home / "panns_data/Cnn14_DecisionLevelMax_mAP=0.385.pth"))).expanduser()
+labels = Path(os.environ.get("REELPACK_PANNS_LABELS", str(home / "panns_data/class_labels_indices.csv"))).expanduser()
+weights = Path(os.environ.get("REELPACK_PANNS_CHECKPOINT", str(home / "panns_data/Cnn14_mAP=0.431.pth"))).expanduser()
+sed = Path(os.environ.get("REELPACK_PANNS_SED_CHECKPOINT", str(home / "panns_data/Cnn14_DecisionLevelMax_mAP=0.385.pth"))).expanduser()
 try:
     valid_labels = labels.is_file() and labels.stat().st_size < 1024 * 1024
     if valid_labels:
@@ -1327,7 +1327,7 @@ py_task skills "$APP_TARGET" "$RUNTIME_ROOT" "$NO_AGENT_REGISTER" "$CHECK_ONLY" 
     die 3 "Cannot validate Reelpack skill/CLI integration resources"
 if [ "$NO_LAUNCH" -eq 0 ]; then
     launch_arguments=(--env "REELPACK_RUNTIME_ROOT=$RUNTIME_ROOT" --env "PATH=$PATH")
-    for variable in REELPACK_CACHE_ROOT NUMBA_CACHE_DIR MPLCONFIGDIR PYTHONPYCACHEPREFIX HF_ENDPOINT HF_HOME HF_HUB_CACHE HUGGINGFACE_HUB_CACHE TORCH_HOME XDG_CACHE_HOME READWECHAT_PANNS_CHECKPOINT READWECHAT_PANNS_SED_CHECKPOINT READWECHAT_PANNS_LABELS; do
+    for variable in REELPACK_CACHE_ROOT NUMBA_CACHE_DIR MPLCONFIGDIR PYTHONPYCACHEPREFIX HF_ENDPOINT HF_HOME HF_HUB_CACHE HUGGINGFACE_HUB_CACHE TORCH_HOME XDG_CACHE_HOME REELPACK_PANNS_CHECKPOINT REELPACK_PANNS_SED_CHECKPOINT REELPACK_PANNS_LABELS; do
         value=${!variable:-}
         [ -z "$value" ] || launch_arguments+=(--env "$variable=$value")
     done

@@ -10,6 +10,10 @@
 - Markdown now includes deduplicated on-screen text with timestamps when available, or an honest empty/unavailable state.
 - The 0.1.1 empty-speech/no-track outcomes, transactional checkpoints, managed installation upgrades, and clean-source build provenance are retained.
 
+## Compatibility
+
+- Environment variables now use the `REELPACK_` prefix (`REELPACK_OCR_BIN`, `REELPACK_OCR_PYTHON`, `REELPACK_AUDIO_PYTHON`, `REELPACK_TRANSNET_PYTHON`, `REELPACK_CLOUD_MODEL`, `REELPACK_TESSERACT_LANG`, `REELPACK_PANNS_*`). The previous prefix is no longer read; update scripts that set it explicitly.
+
 ## Platform
 
 - Apple Silicon / **arm64** only. This archive contains arm64 executables; Intel / x86_64 is not built or validated.
